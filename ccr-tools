@@ -3,7 +3,17 @@
 version = '0.0.1'
 
 import argparse
+import getpass
+import logging
+import os
+import json
 import ccr
+import ccrauth
+
+logging.disable(logging.CRITICAL)
+
+CCRTOOLS_PATH = os.path.expanduser('~') + "/.config/ccr-tools/"
+CCRTOOLS_CONFIG_FILE = CCRTOOLS_PATH + "ccr-tools.conf"
 
 
 def parse_args():
@@ -15,14 +25,17 @@ def parse_args():
                                             "\t\t    ccr-tools --vote shake bfilter\n\n"
                                             "\t\tAdopt package 'shake' and set the notify flag :\n"
                                             "\t\t    ccr-tools -an shake\n\n"
-                                            "\t\tStore authentication information :\n"
-                                            "\t\t    ccr-tools --authenticate\n"
-                                            "\t\t(username, password and type of storage will be asked)\n"
+                                            "\t\tStore login information :\n"
+                                            "\t\t    ccr-tools --login\n"
+                                            "\t\t(username, password and storage method will be asked)\n"
                                             "\t\tTo create a new account just go to:\n"
                                             "\t\t" + ccr.CCR_BASE + "account.php",
                                      formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument('--version', action='version',
                         version="%(prog)s " + version + " (http://ccr-tools.github.io)")
+    parser.add_argument('--login', action='store_true',
+                        help="store login information in KWallet, a database or a file")
+    parser.add_argument('--reset', action='store_true', help="reset login information")
     parser.add_argument('-c', '--check-vote', action='store_true', help="check for voted packages")
     parser.add_argument('-v', '--vote', action='store_true', help="vote for packages")
     parser.add_argument('-V', '--unvote', action='store_true', help="unvote packages")
@@ -37,20 +50,149 @@ def parse_args():
     parser.add_argument('-d', '--delete', action='store_true', help="delete packages")
     parser.add_argument('-l', '--list-categories', action='store_true', help="list all valid categories")
     parser.add_argument('-S', '--status', action='store_true', help="list the status of owned packages")
-    parser.add_argument('-m', '--maintainer', action='store_true', help="list all packages by maintainer")
-    parser.add_argument('-A', '--authenticate', action='store_true',
-                        help="store authentication information in a file, an SQLite database or in KWallet")
-    parser.add_argument('--reset', action='store_true', help="reset authentication information")
-
+    #parser.add_argument('-m', '--maintainer', action='store_true', help="list all packages by maintainer")
     parser.add_argument('pkgs', metavar='<pkgname>', nargs='+')
     return parser.parse_args()
 
-    #todo the idea with -sC was that you could do `-s <pkg> -C` to list the categories, then hit up and complete the category
-    #parser.add_argument('-sC', action='store_true', help="list all valid categories")
 
+def get_config():
+
+    if not os.access(CCRTOOLS_PATH, os.F_OK):
+        os.mkdir(CCRTOOLS_PATH)
+
+    if os.access(CCRTOOLS_CONFIG_FILE, os.F_OK):
+        with open(CCRTOOLS_CONFIG_FILE) as file:
+            data = json.load(file)
+            return data['storage_method']
+    else:
+        return None
+
+
+def set_login_info():
+
+    config = {'storage_method': None}
+    auth = None
+
+    print("Enter login information")
+    username = input("Username: ")
+    password = getpass.getpass("Password: ")
+    method = input("Store login information? (k)wallet / (d)atabase / (f)ile / (n)o")
+
+    if method != 'n':
+        if method == 'k':
+            auth = ccrauth.AuthKWallet()
+        elif method == 'd':
+            auth = ccrauth.AuthDB()
+        elif method == 'f':
+            auth = ccrauth.AuthFile()
+
+        auth.store_auth_info(username, password)
+        config['storage_method'] = method.lower()
+
+    with open(CCRTOOLS_CONFIG_FILE, 'w') as file:
+        json.dump(config, file)
+
+    return username, password
+
+
+def login():
+
+    auth = None
+    username = None
+    password = None
+    storage_method = get_config()
+
+    if storage_method is None:
+        username, password = set_login_info()
+    elif storage_method == 'k':
+        auth = ccrauth.AuthKWallet()
+    elif storage_method == 'd':
+        auth = ccrauth.AuthDB()
+    elif storage_method == 'f':
+        auth = ccrauth.AuthFile()
+
+    if auth:
+        username = auth.username
+        password = auth.password
+
+    return ccr.Session(username, password)
 
 
 if __name__ == '__main__':
 
     args = vars(parse_args())
-    print(args)
+
+    # options that don't need login
+    for option in args.keys():
+        if args[option] is True:
+            if option == 'login':
+                set_login_info()
+                exit(0)
+
+    # options that need login
+    session = login()
+    for option in args.keys():
+        if args[option] is True:
+            pkgargs = args['pkgs']
+            for pkg in pkgargs:
+                if option == 'check_vote':
+                    if session.check_vote(pkg):
+                        print('CHECKVOTE-OK')
+                    else:
+                        print('CHECKVOTE-FALSE')
+                if option == 'vote':
+                    try:
+                        session.vote(pkg)
+                    except:
+                        print('VOTE-ERROR')
+                        continue
+                    print('VOTE-OK')
+                if option == 'unvote':
+                    try:
+                        session.unvote(pkg)
+                    except:
+                        print('UNVOTE-ERROR')
+                        continue
+                    print('UNVOTE-OK')
+                if option == 'flag':
+                    try:
+                        session.flag(pkg)
+                    except:
+                        print('FLAG-ERROR')
+                        continue
+                    print('FLAG-OK')
+                if option == 'unflag':
+                    try:
+                        session.unflag(pkg)
+                    except:
+                        print('UNFLAG-ERROR')
+                        continue
+                    print('UNFLAG-OK')
+                if option == 'notify':
+                    try:
+                        session.notify(pkg)
+                    except:
+                        print('NOTIFY-ERROR')
+                        continue
+                    print('NOTIFY-OK')
+                if option == 'unnotify':
+                    try:
+                        session.unnotify(pkg)
+                    except:
+                        print('UNNOTIFY-ERROR')
+                        continue
+                    print('UNNOTIFY-OK')
+                if option == 'adopt':
+                    try:
+                        session.adopt(pkg)
+                    except:
+                        print('ADOPT-ERROR')
+                        continue
+                    print('ADOPT-OK')
+                if option == 'disown':
+                    try:
+                        session.disown(pkg)
+                    except:
+                        print('DISOWN-ERROR')
+                        continue
+                    print('DISOWN-OK')
