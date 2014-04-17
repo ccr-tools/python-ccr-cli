@@ -2,6 +2,7 @@
 
 version = '0.0.1'
 
+import sys
 import argparse
 import getpass
 import logging
@@ -33,7 +34,7 @@ def parse_args():
                                      formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument('--version', action='version',
                         version="%(prog)s " + version + " (http://ccr-tools.github.io)")
-    parser.add_argument('--login', action='store_true',
+    parser.add_argument('--login-info', action='store_true',
                         help="store login information in KWallet, a database or a file")
     parser.add_argument('--reset', action='store_true', help="reset login information")
     parser.add_argument('-c', '--check-vote', action='store_true', help="check for voted packages")
@@ -46,16 +47,16 @@ def parse_args():
     parser.add_argument('-a', '--adopt', action='store_true', help="adopt orphaned packages")
     parser.add_argument('-D', '--disown', action='store_true', help="disown packages")
     parser.add_argument('-s', '--submit', action='store_true', help="submit new packages")
-    parser.add_argument('-C', '--category', action='store_true', help="set the category for new packages")
+    parser.add_argument('-C', '--setcategory', action='store_true', help="set the category for new packages")
     parser.add_argument('-d', '--delete', action='store_true', help="delete packages")
     parser.add_argument('-l', '--list-categories', action='store_true', help="list all valid categories")
     parser.add_argument('-S', '--status', action='store_true', help="list the status of owned packages")
     #parser.add_argument('-m', '--maintainer', action='store_true', help="list all packages by maintainer")
-    parser.add_argument('pkgs', metavar='<pkgname>', nargs='+')
+    parser.add_argument('pkgs', metavar='<pkgname>', nargs='*')
     return parser.parse_args()
 
 
-def get_config():
+def config():
 
     if not os.access(CCRTOOLS_PATH, os.F_OK):
         os.mkdir(CCRTOOLS_PATH)
@@ -68,7 +69,7 @@ def get_config():
         return None
 
 
-def set_login_info():
+def login_info():
 
     config = {'storage_method': None}
     auth = None
@@ -100,10 +101,10 @@ def login():
     auth = None
     username = None
     password = None
-    storage_method = get_config()
+    storage_method = config()
 
     if storage_method is None:
-        username, password = set_login_info()
+        username, password = login_info()
     elif storage_method == 'k':
         auth = ccrauth.AuthKWallet()
     elif storage_method == 'd':
@@ -120,79 +121,27 @@ def login():
 
 if __name__ == '__main__':
 
+    modname = globals()['__name__']
+    module = sys.modules[modname]
     args = vars(parse_args())
 
-    # options that don't need login
     for option in args.keys():
         if args[option] is True:
-            if option == 'login':
-                set_login_info()
+            # options that don't need login
+            if 'login_info' in option:
+                getattr(module, option)()
                 exit(0)
-
-    # options that need login
-    session = login()
-    for option in args.keys():
-        if args[option] is True:
+            # options that need login
+            if not args['pkgs']:
+                print('--' + option + " option needs at least one package name.")
+                exit(1)
+            session = login()
             pkgargs = args['pkgs']
             for pkg in pkgargs:
-                if option == 'check_vote':
-                    if session.check_vote(pkg):
-                        print('CHECKVOTE-OK')
-                    else:
-                        print('CHECKVOTE-FALSE')
-                if option == 'vote':
-                    try:
-                        session.vote(pkg)
-                    except:
-                        print('VOTE-ERROR')
-                        continue
-                    print('VOTE-OK')
-                if option == 'unvote':
-                    try:
-                        session.unvote(pkg)
-                    except:
-                        print('UNVOTE-ERROR')
-                        continue
-                    print('UNVOTE-OK')
-                if option == 'flag':
-                    try:
-                        session.flag(pkg)
-                    except:
-                        print('FLAG-ERROR')
-                        continue
-                    print('FLAG-OK')
-                if option == 'unflag':
-                    try:
-                        session.unflag(pkg)
-                    except:
-                        print('UNFLAG-ERROR')
-                        continue
-                    print('UNFLAG-OK')
-                if option == 'notify':
-                    try:
-                        session.notify(pkg)
-                    except:
-                        print('NOTIFY-ERROR')
-                        continue
-                    print('NOTIFY-OK')
-                if option == 'unnotify':
-                    try:
-                        session.unnotify(pkg)
-                    except:
-                        print('UNNOTIFY-ERROR')
-                        continue
-                    print('UNNOTIFY-OK')
-                if option == 'adopt':
-                    try:
-                        session.adopt(pkg)
-                    except:
-                        print('ADOPT-ERROR')
-                        continue
-                    print('ADOPT-OK')
-                if option == 'disown':
-                    try:
-                        session.disown(pkg)
-                    except:
-                        print('DISOWN-ERROR')
-                        continue
-                    print('DISOWN-OK')
+                try:
+                    if getattr(session, option)(pkg) is not None:
+                        print(option + '-TRUE OR FALSE')
+                    print(option + '-OK')
+                except None:
+                    print(option + '-ERROR')
+                    continue
